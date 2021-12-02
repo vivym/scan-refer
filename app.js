@@ -1,9 +1,21 @@
+const path = require('path');
 const Koa = require('koa');
 const serve = require('koa-static');
 const mount = require('koa-mount');
-const path = require('path');
+const Router = require('koa-router');
+const views = require('koa-views');
+const koaCash = require('koa-cash');
+const Keyv = require('keyv');
+const { KeyvFile } = require('keyv-file');
+
+const mainRouter = require('./routes/main');
+const viewerRouter = require('./routes/meshviewer');
+const databaseRouter = require('./routes/database');
+const resourceRouter = require('./routes/resource');
 
 const app = new Koa();
+
+app.use(views(path.join(__dirname, 'templates'), { extension: 'ejs' }));
 
 app.use(async (ctx, next) => {
   await next();
@@ -18,16 +30,38 @@ app.use(async (ctx, next) => {
   ctx.set('X-Response-Time', `${ms}ms`);
 });
 
-app.use(mount("/build", serve(path.join(__dirname, '/build'))));
+app.use(mount("/build", serve(path.join(__dirname, 'static/build'), { maxage: 365 * 24 * 60 * 60 * 1000 })));
 
-app.use(mount("/css", serve(path.join(__dirname, '/css'))));
+app.use(mount("/css", serve(path.join(__dirname, 'static/css'), { maxage: 365 * 24 * 60 * 60 * 1000 })));
 
-app.use(mount("/offline", serve(path.join(__dirname, '/offline'))));
+app.use(mount("/offline", serve(path.join(__dirname, 'static/offline'), { maxage: 365 * 24 * 60 * 60 * 1000 })));
 
-app.use(mount("/apps/resource", serve(path.join(__dirname, '/apps/resource'))));
+app.use(mount("/apps/resource", serve(path.join(__dirname, 'static/resource'), { maxage: 365 * 24 * 60 * 60 * 1000 })));
 
-// app.use(async ctx => {
-//   ctx.body = 'Hello World';
-// });
+const keyv = new Keyv({
+  store: new KeyvFile({
+    filename: path.join(__dirname, 'static', 'resource', 'cache.json'),
+    writeDelay: 100,
+  }),
+});
+app.use(koaCash({
+  get: (key) => {
+    return keyv.get(key);
+  },
+  set(key, value) {
+    keyv.set(key, value);
+  },
+}));
+
+const router = new Router();
+router
+  .use('/apps/main', mainRouter.routes(), mainRouter.allowedMethods())
+  .use('/apps/database', databaseRouter.routes(), databaseRouter.allowedMethods())
+  .use('/apps/meshviewer', viewerRouter.routes(), viewerRouter.allowedMethods())
+  .use('/apps/resource', resourceRouter.routes(), resourceRouter.allowedMethods());
+
+app
+  .use(router.routes())
+  .use(router.allowedMethods());
 
 app.listen(3000);
